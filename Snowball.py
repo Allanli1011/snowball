@@ -9,6 +9,7 @@ import datetime
 import pandas as pd
 import math
 from pylab import plt, mpl
+import time
 
 # Get business days during the life of snowball. 
 def get_bdays(maturity):
@@ -62,8 +63,7 @@ def get_value(path,        #simulation paths
              ki_barrier,   #knock-in barrier
              ki_obs,       #knock-in obeservation date
              df,           #discount factors
-             notional      #notional principle
-            ):
+             ):
     obs = path.loc[:,call_obs]>call_barrier                     #find knock-out paths
     called = obs.any(axis=1)                                    #find knock-out paths
     called_value = obs[called]*coupon*df
@@ -74,15 +74,36 @@ def get_value(path,        #simulation paths
 
     nki_value = (~ki).sum()*coupon[-1]*df[-1]                   #discount paths that do not knock-in either knock-out
 
-    return (called_value.sum()+ki_value.sum()+nki_value)/path.shape[0]*notional #average all paths
+    return (called_value.sum()+ki_value.sum()+nki_value)/path.shape[0] #average all paths
 
+# Get the delta & gamma of the snowball
+def get_delta_and_gamma(step=0.01):
+    s = np.linspace(ki_barrier*0.5, call_barrier*1.5, num=int((call_barrier*1.5-ki_barrier*0.5)/step)+1)
+    v = []
+    for i in range(len(s)):
+        path_s = path * s[i]
+        v.append(get_value(path_s, coupon, call_barrier, call_obs, ki_barrier, ki_obs, df))
+    delta = pd.DataFrame(data = np.diff(v)/np.diff(s), index = s[1:], columns=['delta'])
+    d_delta = np.diff(delta['delta'])
+    gamma = pd.DataFrame(data = d_delta/np.diff(s[1:]), index = s[2:], columns=['gamma'])
+    plt.style.use('seaborn')
+    mpl.rcParams['font.family'] = 'serif'
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    ax1.plot(delta, lw=1.5)
+    ax1.set_xlabel('Underlying Price')
+    ax1.set_ylabel('Delta')
+    ax2.plot(gamma, lw=1.5)
+    ax2.set_xlabel('Underlying Price')
+    ax2.set_ylabel('Gamma')
+    
+    return delta, gamma
 
 
 r = 0.03                                                        #risk-free rate
 sigma = 0.26                                                    #volatility of underlying
 maturity = 1                                                    #life of the snowball
-num_simulation = 10000                                          #number of simulation
-annualized_coupon = 0.1991                                      #coupon offered by the dealer
+num_simulation = 100000                                         #number of simulation
+annualized_coupon = 0.1991                                      #annualized coupon offered by the dealer
 bdays = get_bdays(maturity)                                     #get business days in the whole life of snowball
 S = get_path(r, sigma, len(bdays), num_simulation, maturity)    #generate corresponding geometric brownian motion paths
 path = pd.DataFrame(data = S, index = bdays).T                  #form the dataframe for simulated paths
@@ -94,6 +115,18 @@ if len(call_obs) != maturity * 12:                              #need to find a 
 ki_barrier = 0.75                                               #knock-in barrier
 ki_obs = bdays                                                  #knock-in observation date
 df = get_df(r, call_obs)                                        #generate the discount factors for each knock-out date
-notional = 1
-value = get_value(path, coupon, call_barrier, call_obs, ki_barrier, ki_obs, df, notional)
-print('The value of the snowball is '+str(value))
+start_0 = time.time()
+value = get_value(path, coupon, call_barrier, call_obs, ki_barrier, ki_obs, df)
+end_0 = time.time()
+print('-'*50)
+print('The value of the snowball is %.5f' % value)
+print('-'*50)
+print('The time spent on valuation is %.5f' % (end_0-start_0)+'s')
+print('-'*50)
+start_1 = time.time()
+delta, gamma = get_delta_and_gamma()
+end_1 = time.time()
+print('The time spent on calculating delta and gamma is %.5f' % (end_1-start_1)+'s')
+print('-'*50)
+
+
